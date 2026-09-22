@@ -8,7 +8,11 @@
     "scheme": "bombpanic",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "infoPlist": {
+        "NSLocalNetworkUsageDescription": "BoomPanic uses your local network to create and join games with nearby friends."
+      },
+      "bundleIdentifier": "com.vinaykumar9961.BombPanic"
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +21,12 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.vinaykumar9961.BombPanic"
     },
     "web": {
       "output": "static",
@@ -31,6 +40,14 @@
           "backgroundColor": "#208AEF",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
+        }
+      ],
+      "expo-sharing",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow BoomPanic to scan a game QR code.",
+          "barcodeScannerEnabled": true
         }
       ]
     ],

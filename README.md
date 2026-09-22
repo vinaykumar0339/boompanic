@@ -1,56 +1,54 @@
-# Welcome to your Expo app 👋
+# BoomPanic
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+Pass it. Outsmart them. Don’t hold the BOOM.
 
-## Get started
+BoomPanic is a two-player bomb-passing game with no accounts and no BoomPanic backend. The host is the temporary game authority: it validates passes, chooses the hidden 20–60 second explosion time, and sends game events. Devices render locally; the countdown is never streamed per frame.
 
-1. Install dependencies
+## Run a development build
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+This app cannot use Expo Go for multiplayer. `react-native-tcp-socket` and `react-native-webrtc` contain native code.
 
 ```bash
-npm run reset-project
+npx expo prebuild
+npx expo run:android
+# or
+npx expo run:ios
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+For a shareable build, configure EAS for the project, then use:
 
-### Other setup steps
+```bash
+npx eas-cli@latest build --profile development --platform android
+npx expo start --dev-client
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Do not hand-edit the generated `android/` or `ios/` folders. Native configuration belongs in `app.json`.
 
-## Learn more
+## Local game
 
-To learn more about developing your project with Expo, look at the following resources:
+1. Put both physical devices on the same Wi-Fi network, or connect the second device to the host device’s hotspot.
+2. On Player 1, choose **Local Game → Create Game**.
+3. On Player 2, choose **Local Game → Join Game**, scan the QR code, or enter the displayed `IP:port`.
+4. Once connected, both players select **I’m Ready**. The host starts the duel.
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+Local game uses a direct TCP connection. QR/IP entry is deliberate for V1: it is simpler and more reliable than mDNS or UDP broadcast across hotspot and mixed Android/iOS networks.
 
-## Join the community
+## Online game
 
-Join our community of developers creating universal apps.
+1. Player 1 selects **Online Game → Create Game** and shares the offer QR/payload.
+2. Player 2 scans/pastes it to produce an answer QR/payload.
+3. Player 1 scans/pastes the answer. The two devices then attempt a direct WebRTC DataChannel connection.
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+There is no custom signaling or matchmaking server. The app uses a public STUN endpoint only to discover reachable public candidates; game data goes over the direct DataChannel. It never configures TURN or a relay.
+
+## Limitations and physical-device checklist
+
+Direct online P2P is not guaranteed. Symmetric NAT, carrier-grade NAT, restrictive firewalls, captive portals, some mobile networks, and Wi-Fi client isolation can prevent direct WebRTC connectivity. In those cases the app reports that the direct connection is unavailable; retry on another network or use Local Mode. A TURN relay would improve reliability but is intentionally not included because it would be server infrastructure.
+
+Test before release:
+
+- Local: Android↔Android, iOS↔iOS, Android↔iOS; same Wi-Fi; phone hotspot; isolated/different LANs.
+- Online: Wi-Fi↔Wi-Fi, Wi-Fi↔mobile data, mobile↔mobile, Android↔iOS.
+- Gameplay: valid/invalid pass, simultaneous presses, disconnect/reconnect, background/foreground, explosion, rematch, and malformed QR/network data.
+
+The UI and TypeScript compile have been checked; real TCP/WebRTC interoperability still requires those two-device tests.
