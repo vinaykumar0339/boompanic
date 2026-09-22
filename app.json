@@ -1,45 +1,42 @@
 {
   "expo": {
-    "name": "BombPanic",
-    "slug": "BombPanic",
+    "name": "Boom Panic",
+    "slug": "boom-panic",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/boom-app-icon.png",
     "scheme": "bombpanic",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon",
       "infoPlist": {
         "NSLocalNetworkUsageDescription": "BoomPanic uses your local network to create and join games with nearby friends."
       },
-      "bundleIdentifier": "com.vinaykumar9961.BombPanic"
+      "bundleIdentifier": "com.vinaykumar9961.BoomPanic.ios"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/images/android-icon-foreground.png",
-        "backgroundImage": "./assets/images/android-icon-background.png",
-        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+        "backgroundColor": "#080E26",
+        "foregroundImage": "./assets/images/boom-app-icon.png"
       },
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.CAMERA",
         "android.permission.RECORD_AUDIO"
       ],
-      "package": "com.vinaykumar9961.BombPanic"
+      "package": "com.vinaykumar9961.BoomPanic.android"
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/boom-app-icon.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "backgroundColor": "#080E26",
+          "image": "./assets/images/boom-app-icon.png",
+          "imageWidth": 120
         }
       ],
       "expo-sharing",
