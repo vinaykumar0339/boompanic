@@ -25,6 +25,10 @@ function isChallenge(value: unknown): value is Challenge {
   return typeof candidate.id === 'string' && typeof candidate.type === 'string' && typeof candidate.prompt === 'string' && typeof candidate.category === 'string' && typeof candidate.difficulty === 'number';
 }
 
+function isPlayerList(value: unknown): value is Player[] {
+  return Array.isArray(value) && value.length === 2 && value.every((player) => !!player && typeof player === 'object' && typeof (player as Player).id === 'string' && typeof (player as Player).name === 'string' && typeof (player as Player).ready === 'boolean');
+}
+
 /** Host-authoritative round state. The network transport only carries its events. */
 export class GameEngine {
   private snapshot: GameSnapshot;
@@ -41,10 +45,12 @@ export class GameEngine {
   private turns = 0;
 
   constructor(private network: GameNetwork, readonly localPlayer: Player, private readonly isAuthority: boolean) {
-    this.snapshot = { phase: 'lobby', players: [localPlayer], bombOwnerId: null, loserId: null, notice: 'Waiting for a rival…', challenge: null, challengeDurationMs: 0, challengeStartedAt: null, difficulty: 'EASY', bombStartedAt: null, playerStats: { [localPlayer.id]: emptyStats() }, rematchPlayerIds: [], roundId: null, turnId: null };
+    this.localPlayer.ready = false;
+    const initialPlayer = { ...localPlayer, ready: false };
+    this.snapshot = { phase: 'lobby', players: [initialPlayer], bombOwnerId: null, loserId: null, notice: 'Waiting for a rival…', challenge: null, challengeDurationMs: 0, challengeStartedAt: null, difficulty: 'EASY', bombStartedAt: null, playerStats: { [initialPlayer.id]: emptyStats() }, rematchPlayerIds: [], roundId: null, turnId: null };
     this.unsubscribe = network.onMessage((incoming) => this.receive(incoming));
     this.stateUnsubscribe = network.onConnectionStateChange((state, detail) => {
-      if (state === 'DISCONNECTED' || state === 'FAILED') this.update({ notice: detail ?? 'Connection lost. The host keeps the round authoritative.' });
+      if (state === 'DISCONNECTED' || state === 'FAILED') this.handlePeerDeparture(detail ?? 'Your rival left the game.');
     });
     this.heartbeat = setInterval(() => this.pulse(), 6_000);
   }
@@ -52,9 +58,24 @@ export class GameEngine {
   getSnapshot() { return this.snapshot; }
   subscribe(listener: (snapshot: GameSnapshot) => void) { this.listeners.add(listener); listener(this.snapshot); return () => this.listeners.delete(listener); }
   private update(patch: Partial<GameSnapshot>) { this.snapshot = { ...this.snapshot, ...patch }; this.listeners.forEach((listener) => listener(this.snapshot)); }
-  private async transmit(type: GameMessage['type'], payload?: Record<string, unknown>) { await this.network.send(message(type, this.localPlayer.id, payload)); }
+  private async transmit(type: GameMessage['type'], payload?: Record<string, unknown>) {
+    try { await this.network.send(message(type, this.localPlayer.id, payload)); return true; }
+    catch { this.update({ notice: 'Could not send that update. Check your internet connection.' }); return false; }
+  }
+  private async broadcastLobby() {
+    if (!this.isAuthority) return;
+    await this.transmit('LOBBY_STATE', { players: this.snapshot.players.map((player) => ({ id: player.id, name: player.name, ready: player.ready })) });
+  }
   async announceJoin() { await this.transmit('PLAYER_JOINED', { name: this.localPlayer.name }); }
-  async toggleReady() { const ready = !this.localPlayer.ready; this.localPlayer.ready = ready; this.replacePlayer(this.localPlayer); await this.transmit('PLAYER_READY', { ready }); }
+  async toggleReady() {
+    if (this.snapshot.phase !== 'lobby' || this.snapshot.players.length !== 2) return;
+    const ready = !this.localPlayer.ready; const next = { ...this.localPlayer, ready };
+    this.localPlayer.ready = ready; this.replacePlayer(next);
+    if (this.isAuthority) await this.broadcastLobby();
+    else await this.transmit('PLAYER_READY', { playerId: this.localPlayer.id, ready });
+  }
+
+  async leave() { try { await this.transmit('PLAYER_DISCONNECTED'); } catch { /* The peer may already be gone. */ } }
 
   async start() {
     if (!this.isAuthority || this.snapshot.players.length !== 2 || !this.snapshot.players.every((player) => player.ready)) return;
@@ -67,7 +88,7 @@ export class GameEngine {
     const roundId = newId('round');
     const stats = Object.fromEntries(this.snapshot.players.map((player) => [player.id, emptyStats()])) as Record<string, PlayerRoundStats>;
     this.update({ phase: 'countdown', bombOwnerId: owner, loserId: null, notice: '3', challenge: null, roundId, turnId: null, playerStats: stats, rematchPlayerIds: [], bombStartedAt: null });
-    await this.transmit('GAME_START', { owner, roundId });
+    if (!await this.transmit('GAME_START', { owner, roundId })) return;
     [2, 1].forEach((count, index) => this.delayedTimers.push(setTimeout(() => this.update({ notice: String(count) }), (index + 1) * 1_000)));
     this.delayedTimers.push(setTimeout(() => {
       if (this.snapshot.roundId !== roundId || this.snapshot.phase !== 'countdown') return;
@@ -119,14 +140,14 @@ export class GameEngine {
     }
     const next = { ...stats, streak: 0, incorrect: stats.incorrect + 1 };
     this.update({ phase: 'answer_submitted', playerStats: { ...this.snapshot.playerStats, [senderId]: next }, notice: '❌ WRONG! New challenge. -1.5 sec.' });
-    await this.transmit('ANSWER_RESULT', { owner: senderId, roundId, turnId, correct: false, stats: next }); this.applyPenaltyAndReplace(senderId);
+    if (await this.transmit('ANSWER_RESULT', { owner: senderId, roundId, turnId, correct: false, stats: next })) this.applyPenaltyAndReplace(senderId);
   }
 
   private async challengeExpired(turnId: string) {
     if (!this.isAuthority || this.snapshot.phase !== 'challenge_active' || this.snapshot.turnId !== turnId || !this.snapshot.bombOwnerId) return;
     const owner = this.snapshot.bombOwnerId; const stats = this.snapshot.playerStats[owner] ?? emptyStats(); const next = { ...stats, streak: 0, incorrect: stats.incorrect + 1 };
     this.update({ phase: 'answer_submitted', playerStats: { ...this.snapshot.playerStats, [owner]: next }, notice: '⌛ Challenge expired! -1.5 sec.' });
-    await this.transmit('ANSWER_RESULT', { owner, roundId: this.snapshot.roundId!, turnId, correct: false, expired: true, stats: next }); this.applyPenaltyAndReplace(owner);
+    if (await this.transmit('ANSWER_RESULT', { owner, roundId: this.snapshot.roundId!, turnId, correct: false, expired: true, stats: next })) this.applyPenaltyAndReplace(owner);
   }
 
   private applyPenaltyAndReplace(owner: string) {
@@ -165,12 +186,26 @@ export class GameEngine {
       case 'PLAYER_JOINED': {
         const name = typeof incoming.payload?.name === 'string' ? incoming.payload.name.slice(0, 18) : 'Rival'; if (this.snapshot.players.length > 1) return;
         const rival = { id: incoming.senderId, name, ready: false }; this.update({ players: [...this.snapshot.players, rival], playerStats: { ...this.snapshot.playerStats, [rival.id]: emptyStats() }, notice: 'Rival connected.' });
-        if (this.isAuthority) void this.transmit('PLAYER_JOINED', { name: this.localPlayer.name }); return;
+        if (this.isAuthority) { void this.transmit('PLAYER_JOINED', { name: this.localPlayer.name }); void this.broadcastLobby(); } return;
       }
       case 'PLAYER_READY': {
         const targetId = typeof incoming.payload?.playerId === 'string' ? incoming.payload.playerId : incoming.senderId;
         if (!this.snapshot.players.some((player) => player.id === targetId) || (this.isAuthority && targetId !== incoming.senderId)) return;
-        const ready = incoming.payload?.ready === true; this.replacePlayer({ ...this.snapshot.players.find((player) => player.id === targetId)!, ready }); if (this.isAuthority) void this.transmit('PLAYER_READY', { playerId: targetId, ready }); return;
+        const ready = incoming.payload?.ready === true; this.replacePlayer({ ...this.snapshot.players.find((player) => player.id === targetId)!, ready }); if (this.isAuthority) void this.broadcastLobby(); return;
+      }
+      case 'LOBBY_STATE': {
+        const players = incoming.payload?.players;
+        if (this.isAuthority || this.snapshot.phase !== 'lobby' || !isPlayerList(players) || !players.some((player) => player.id === this.localPlayer.id)) return;
+        const local = players.find((player) => player.id === this.localPlayer.id)!;
+        this.localPlayer.ready = local.ready;
+        const playerStats = Object.fromEntries(players.map((player) => [player.id, this.snapshot.playerStats[player.id] ?? emptyStats()])) as Record<string, PlayerRoundStats>;
+        this.update({ phase: 'lobby', players: players.map((player) => ({ ...player, name: player.name.slice(0, 18) })), playerStats, notice: players.every((player) => player.ready) ? 'Both players are ready. Host can start the round.' : 'Waiting for both players to be ready.' });
+        return;
+      }
+      case 'PLAYER_DISCONNECTED': {
+        if (!this.snapshot.players.some((player) => player.id === incoming.senderId)) return;
+        this.handlePeerDeparture('Your rival left the game.');
+        return;
       }
       case 'GAME_START': {
         const owner = incoming.payload?.owner; const roundId = incoming.payload?.roundId;
@@ -219,7 +254,15 @@ export class GameEngine {
   }
 
   private replacePlayer(next: Player) { this.update({ players: this.snapshot.players.map((player) => player.id === next.id ? next : player) }); }
-  private pulse() { if (Date.now() - this.lastPeerMessage > 22_000 && this.snapshot.players.length > 1) this.update({ notice: 'Connection seems quiet. Trying to reconnect…' }); else void this.transmit('PING').catch(() => undefined); }
+  private handlePeerDeparture(notice: string) {
+    this.clearRoundTimers(); this.localPlayer.ready = false;
+    this.update({ phase: 'lobby', players: [{ ...this.localPlayer, ready: false }], bombOwnerId: null, challenge: null, challengeDurationMs: 0, challengeStartedAt: null, roundId: null, turnId: null, notice });
+  }
+  private pulse() {
+    if (this.snapshot.players.length < 2) return;
+    if (Date.now() - this.lastPeerMessage > 22_000) this.update({ notice: 'Connection seems quiet. Trying to reconnect…' });
+    else void this.transmit('PING').catch(() => undefined);
+  }
   private clearChallengeTimer() { if (this.challengeTimer) clearTimeout(this.challengeTimer); this.challengeTimer = null; }
   private clearRoundTimers() { if (this.bombTimer) clearTimeout(this.bombTimer); this.bombTimer = null; this.clearChallengeTimer(); this.delayedTimers.forEach(clearTimeout); this.delayedTimers = []; }
   dispose() { this.clearRoundTimers(); if (this.heartbeat) clearInterval(this.heartbeat); this.unsubscribe(); this.stateUnsubscribe(); }

@@ -13,7 +13,9 @@ export default function TabLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <GameSessionProvider>
-        <Stack screenOptions={{ headerShown: false }} />
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="game" options={{ gestureEnabled: false }} />
+        </Stack>
       </GameSessionProvider>
     </ThemeProvider>
   );

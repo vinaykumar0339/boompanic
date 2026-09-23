@@ -1,5 +1,5 @@
 export const GAME_MESSAGE_TYPES = [
-  'PLAYER_JOINED', 'PLAYER_READY', 'GAME_START', 'CHALLENGE_ASSIGNED',
+  'PLAYER_JOINED', 'PLAYER_READY', 'LOBBY_STATE', 'GAME_START', 'CHALLENGE_ASSIGNED',
   'ANSWER_SUBMITTED', 'ANSWER_RESULT', 'BOMB_PASS_REQUEST', 'BOMB_PASS',
   'BOMB_EXPLODED', 'REMATCH', 'REMATCH_STATUS', 'PING', 'PONG', 'PLAYER_DISCONNECTED',
 ] as const;
@@ -33,5 +33,5 @@ export function decodeGameMessage(raw: string): GameMessage | null {
 }
 
 export function message(type: GameMessageType, senderId: string, payload?: Record<string, unknown>): GameMessage {
-  return { type, senderId, timestamp: Date.now(), payload };
+  return payload === undefined ? { type, senderId, timestamp: Date.now() } : { type, senderId, timestamp: Date.now(), payload };
 }
