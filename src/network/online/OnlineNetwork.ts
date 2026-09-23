@@ -1,4 +1,4 @@
-import { addDoc, collection, deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, runTransaction } from 'firebase/firestore';
+import { addDoc, collection, deleteDoc, doc, getDoc, getDocFromServer, onSnapshot, orderBy, query, runTransaction } from 'firebase/firestore';
 
 import { decodeGameMessage, type GameMessage } from '../GameProtocol';
 import type { ConnectionState, GameNetwork } from '../GameNetwork';
@@ -29,7 +29,8 @@ export class OnlineNetwork implements GameNetwork {
 
   private listenForMessages() {
     if (!this.roomRef || this.messagesListener) return;
-    this.messagesListener = onSnapshot(collection(this.roomRef, 'messages'), (snapshot) => {
+    const messages = query(collection(this.roomRef, 'messages'), orderBy('message.timestamp'));
+    this.messagesListener = onSnapshot(messages, (snapshot) => {
       snapshot.docChanges().forEach((change) => {
         if (change.type !== 'added') return;
         const message = decodeGameMessage(JSON.stringify(change.doc.data().message));
@@ -129,7 +130,10 @@ export class OnlineNetwork implements GameNetwork {
 
   async send(message: GameMessage) {
     if (!this.roomRef || this.state !== 'CONNECTED') throw new Error('No game room is connected.');
-    await addDoc(collection(this.roomRef, 'messages'), { authorId: this.localUserId, message });
+    // Firestore does not accept undefined values. Challenges use optional fields,
+    // so serialize the plain event before persisting it.
+    const safeMessage = JSON.parse(JSON.stringify(message)) as GameMessage;
+    await addDoc(collection(this.roomRef, 'messages'), { authorId: this.localUserId, message: safeMessage });
   }
 
   onMessage(callback: (message: GameMessage) => void) {
